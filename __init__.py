@@ -5,6 +5,7 @@ import traceback
 vendor_dir = os.path.join(os.path.dirname(__file__), 'lib')
 if vendor_dir not in sys.path:
     sys.path.append(vendor_dir)
+import webbrowser
 
 import bpy
 import json
@@ -213,14 +214,30 @@ def handle_get_selection():
     send_message_to_server({"type": "revit_selection_response", "payload": selected_guids})
     global status_message; status_message = f"{len(selected_guids)}개 객체 선택 정보 전송."
 
-# --- UI 및 등록/해제 ---
 class COSTESTIMATOR_OT_Connect(bpy.types.Operator):
     bl_idname = "costestimator.connect"; bl_label = "서버에 연결"
     def execute(self, context):
         global status_message
-        if websocket_client: self.report({'WARNING'}, "이미 연결되어 있습니다."); return {'CANCELLED'}
+        if websocket_client:
+            self.report({'WARNING'}, "이미 연결되어 있습니다.")
+            return {'CANCELLED'}
+        
         uri = context.scene.costestimator_server_url
-        status_message = "서버에 연결 시도 중..."; run_websocket_in_thread(uri)
+
+        # --- 이 부분이 추가되었습니다 ---
+        try:
+            # ws://127.0.0.1:8000/ws/blender-connector/ -> http://127.0.0.1:8000
+            base_address = uri.replace("ws://", "").replace("wss://", "").split("/")[0]
+            web_url = f"http://{base_address}"
+            webbrowser.open(web_url)
+            print(f"웹 브라우저에서 {web_url} 주소를 엽니다.")
+        except Exception as e:
+            print(f"웹 브라우저를 여는 데 실패했습니다: {e}")
+            self.report({'WARNING'}, f"웹 브라우저 열기 실패: {e}")
+        # --- 여기까지 추가 ---
+
+        status_message = "서버에 연결 시도 중..."
+        run_websocket_in_thread(uri)
         return {'FINISHED'}
 
 class COSTESTIMATOR_OT_Disconnect(bpy.types.Operator):
