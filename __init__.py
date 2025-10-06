@@ -52,8 +52,6 @@ def get_ifc_file():
         return None, f"IFC 파일을 여는 데 실패했습니다: {e}"
 
 
-
-# ▼▼▼ [최종 수정] serialize_ifc_elements_to_string_list 함수를 아래의 완성된 코드로 교체해주세요. ▼▼▼
 def get_quantity_value(quantity):
     """IfcQuantity* 객체에서 실제 값(AreaValue, VolumeValue 등)을 추출하는 헬퍼 함수"""
     if quantity.is_a("IfcQuantityArea"): return quantity.AreaValue
@@ -78,7 +76,7 @@ def serialize_ifc_elements_to_string_list(ifc_file):
 
         element_dict = {
             "Name": element.Name or "이름 없음",
-            "Category": element.is_a(),
+            "IfcClass": element.is_a(), # <--- 이 부분이 "IfcClass"인지 반드시 확인!
             "ElementId": element.id(),
             "UniqueId": element.GlobalId,
             "Parameters": {}, "TypeParameters": {}, "RelatingType": None,
@@ -150,8 +148,6 @@ def serialize_ifc_elements_to_string_list(ifc_file):
         elements_data.append(json.dumps(element_dict))
 
     return elements_data
-
-
 
 def get_selected_element_guids():
     """ 현재 선택된 객체들의 GlobalId 목록을 반환합니다. (참고 코드 적용) """
