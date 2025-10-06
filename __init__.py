@@ -15,6 +15,7 @@ import asyncio
 import threading
 import websockets
 from bpy.app.handlers import persistent
+import io  #  <-- 이 줄을 추가해주세요.
 
 bl_info = {
     "name": "Cost Estimator Connector", "author": "AI Assistant & User",
@@ -35,46 +36,123 @@ def schedule_blender_task(task_callable, *args, **kwargs):
         return None
     bpy.app.timers.register(safe_task)
 
-# --- IFC 데이터 처리 함수 (최종 수정) ---
+# ▼▼▼ [최종 수정 1] get_ifc_file 함수를 아래의 가장 안정적인 코드로 교체해주세요. ▼▼▼
 def get_ifc_file():
     try:
+        # BlenderBIM 프로젝트에 설정된 IFC 파일 경로를 가져옵니다.
         ifc_file_path = bpy.data.scenes["Scene"].BIMProperties.ifc_file
         if not ifc_file_path or not os.path.exists(ifc_file_path):
             return None, "IFC 파일 경로를 찾을 수 없습니다. BlenderBIM 프로젝트를 확인하세요."
+        
+        # 디스크에 저장된 파일을 직접 다시 엽니다. 이것이 가장 확실하고 안정적인 방법입니다.
         return ifcopenshell.open(ifc_file_path), None
+    
     except Exception as e:
+        print(f"IFC 파일을 여는 데 실패했습니다: {e}")
         return None, f"IFC 파일을 여는 데 실패했습니다: {e}"
 
+
+
+# ▼▼▼ [최종 수정] serialize_ifc_elements_to_string_list 함수를 아래의 완성된 코드로 교체해주세요. ▼▼▼
+def get_quantity_value(quantity):
+    """IfcQuantity* 객체에서 실제 값(AreaValue, VolumeValue 등)을 추출하는 헬퍼 함수"""
+    if quantity.is_a("IfcQuantityArea"): return quantity.AreaValue
+    if quantity.is_a("IfcQuantityLength"): return quantity.LengthValue
+    if quantity.is_a("IfcQuantityVolume"): return quantity.VolumeValue
+    if quantity.is_a("IfcQuantityCount"): return quantity.CountValue
+    if quantity.is_a("IfcQuantityWeight"): return quantity.WeightValue
+    return None
+
 def serialize_ifc_elements_to_string_list(ifc_file):
+    """
+    IFC 파일의 모든 IfcProduct(공간 구조 포함 모든 객체)와 관련된 데이터를 안정적으로 추출하여 직렬화합니다.
+    """
     elements_data = []
+    # [핵심 수정 1] 데이터 추출 대상을 IfcElement에서 다시 IfcProduct(모든 객체)로 변경합니다.
     products = ifc_file.by_type("IfcProduct")
+    print(f"🔍 [Blender] ifc_file.by_type('IfcProduct')가 찾은 모든 객체 개수: {len(products)}")
+
     for element in products:
-        if not element.GlobalId: continue
+        if not element.GlobalId:
+            continue
+
         element_dict = {
-            "Name": element.Name or "이름 없음", "Category": element.is_a(),
-            "ElementId": element.id(), "UniqueId": element.GlobalId,
-            "Parameters": {}, "TypeParameters": {}
+            "Name": element.Name or "이름 없음",
+            "Category": element.is_a(),
+            "ElementId": element.id(),
+            "UniqueId": element.GlobalId,
+            "Parameters": {}, "TypeParameters": {}, "RelatingType": None,
+            "SpatialContainer": None, "Aggregates": None, "Nests": None,
         }
+        
+        # [핵심 수정 2] 현재 객체가 공간 구조(Site, Building, Storey)인지 미리 확인합니다.
+        is_spatial_element = element.is_a("IfcSpatialStructureElement")
+
         try:
+            # 공통 속성 추출 (모든 객체 대상)
             if hasattr(element, 'IsDefinedBy') and element.IsDefinedBy:
                 for definition in element.IsDefinedBy:
                     if definition.is_a("IfcRelDefinesByProperties"):
                         prop_set = definition.RelatingPropertyDefinition
                         if prop_set and prop_set.is_a("IfcPropertySet"):
                             pset_name = prop_set.Name
-                            if pset_name == "Dimensions": continue
-                            if hasattr(prop_set, 'HasProperties'):
+                            if hasattr(prop_set, 'HasProperties') and prop_set.HasProperties:
                                 for prop in prop_set.HasProperties:
                                     if prop.is_a("IfcPropertySingleValue"):
-                                        prop_name = prop.Name
-                                        prop_value = prop.NominalValue.wrappedValue if prop.NominalValue else None
-                                        element_dict["Parameters"][f"{pset_name}.{prop_name}"] = prop_value
-        except Exception as e:
-            print(f"Pset 처리 중 오류 (객체 ID: {element.id()}): {e}")
+                                        element_dict["Parameters"][f"{pset_name}.{prop.Name}"] = prop.NominalValue.wrappedValue if prop.NominalValue else None
+
+            # [핵심 수정 3] 물리적 부재(공간 구조가 아닌 객체)일 경우에만 상세 속성을 추가로 추출합니다.
+            if not is_spatial_element:
+                if hasattr(element, 'IsDefinedBy') and element.IsDefinedBy:
+                    for definition in element.IsDefinedBy:
+                        if definition.is_a("IfcRelDefinesByProperties"):
+                            prop_set = definition.RelatingPropertyDefinition
+                            if prop_set and prop_set.is_a("IfcElementQuantity"):
+                                qto_name = prop_set.Name
+                                if hasattr(prop_set, 'Quantities') and prop_set.Quantities:
+                                    for quantity in prop_set.Quantities:
+                                        prop_value = get_quantity_value(quantity)
+                                        if prop_value is not None:
+                                            element_dict["Parameters"][f"{qto_name}.{quantity.Name}"] = prop_value
+
+                if hasattr(element, 'IsTypedBy') and element.IsTypedBy:
+                    type_definition = element.IsTypedBy[0]
+                    if type_definition and type_definition.is_a("IfcRelDefinesByType"):
+                        relating_type = type_definition.RelatingType
+                        if relating_type:
+                            element_dict["RelatingType"] = relating_type.Name
+                            if hasattr(relating_type, 'HasPropertySets') and relating_type.HasPropertySets:
+                                for prop_set in relating_type.HasPropertySets:
+                                    if prop_set and prop_set.is_a("IfcPropertySet"):
+                                        pset_name = prop_set.Name
+                                        if hasattr(prop_set, 'HasProperties') and prop_set.HasProperties:
+                                            for prop in prop_set.HasProperties:
+                                                if prop.is_a("IfcPropertySingleValue"):
+                                                    element_dict["TypeParameters"][f"{pset_name}.{prop.Name}"] = prop.NominalValue.wrappedValue if prop.NominalValue else None
+
+                if hasattr(element, 'ContainedInStructure') and element.ContainedInStructure:
+                    container = element.ContainedInStructure[0].RelatingStructure
+                    element_dict["SpatialContainer"] = f"{container.is_a()}: {container.Name}"
+            
+            # 집합 관계는 모든 객체 유형에 대해 공통적으로 확인
+            if hasattr(element, 'Decomposes') and element.Decomposes:
+                aggregate = element.Decomposes[0].RelatingObject
+                element_dict["Aggregates"] = f"{aggregate.is_a()}: {aggregate.Name}"
+
+            if hasattr(element, 'Nests') and element.Nests:
+                nest_parent = element.Nests[0].RelatingObject
+                element_dict["Nests"] = f"{nest_parent.is_a()}: {nest_parent.Name}"
+
+        except (AttributeError, IndexError, TypeError) as e:
+            print(f"객체(ID: {element.id()}) 데이터 추출 중 경고: {e}")
+            pass
+
         elements_data.append(json.dumps(element_dict))
+
     return elements_data
 
-# ▼▼▼ [핵심 수정 1] '선택객체 가져오기'를 위한 함수 ▼▼▼
+
+
 def get_selected_element_guids():
     """ 현재 선택된 객체들의 GlobalId 목록을 반환합니다. (참고 코드 적용) """
     guids = []
