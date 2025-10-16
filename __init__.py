@@ -7,13 +7,13 @@ import traceback
 import platform #<-- 운영체제 감지를 위해 추가
 
 # --- ▼▼▼ [핵심 수정] 라이브러리 경로 추가 코드를 맨 위로 이동 ▼▼▼ ---
-# 1. 애드온의 루트 디렉토리를 기준으로 라이브러리가 있는 site-packages 폴더의 경로를 만듭니다.
-#    사용자님의 환경에 맞게 경로를 수정했습니다.
-vendor_dir = os.path.join(os.path.dirname(__file__), '.mddoyun', 'lib', 'python3.11', 'site-packages')
+# 1. 애드온의 루트 디렉토리(__file__가 있는 곳)를 기준으로 'lib' 폴더의 절대 경로를 생성합니다.
+lib_dir = os.path.join(os.path.dirname(__file__), 'lib')
 
-# 2. 이 경로를 파이썬이 모듈을 검색하는 경로 리스트에 추가합니다.
-if vendor_dir not in sys.path:
-    sys.path.append(vendor_dir)
+# 2. 생성된 경로를 파이썬 모듈 검색 경로 리스트(sys.path)에 추가합니다.
+#    이렇게 하면 'lib' 폴더 안에 있는 'websockets' 같은 라이브러리를 import 할 수 있게 됩니다.
+if lib_dir not in sys.path:
+    sys.path.append(lib_dir)
 # --- ▲▲▲ 여기까지가 핵심 수정입니다 ▲▲▲ ---
 
 # --- 이제 외부 라이브러리를 import 합니다. ---
