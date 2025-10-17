@@ -98,6 +98,7 @@ def get_quantity_value(quantity):
 def serialize_ifc_elements_to_string_list(ifc_file):
     elements_data = []
     products = ifc_file.by_type("IfcProduct")
+    print(f"🔍 [Blender] {len(products)}개의 IFC 객체 데이터 직렬화를 시작합니다.") # 디버깅 추가
     for element in products:
         if not element.GlobalId: continue
         element_dict = { "Name": element.Name or "이름 없음", "IfcClass": element.is_a(), "ElementId": element.id(), "UniqueId": element.GlobalId, "Parameters": {}, "TypeParameters": {}, "RelatingType": None, "SpatialContainer": None, "Aggregates": None, "Nests": None, }
@@ -110,7 +111,11 @@ def serialize_ifc_elements_to_string_list(ifc_file):
                         if prop_set and prop_set.is_a("IfcPropertySet"):
                             if hasattr(prop_set, 'HasProperties') and prop_set.HasProperties:
                                 for prop in prop_set.HasProperties:
-                                    if prop.is_a("IfcPropertySingleValue"): element_dict["Parameters"][f"{prop_set.Name}.{prop.Name}"] = prop.NominalValue.wrappedValue if prop.NominalValue else None
+                                    # ▼▼▼ [수정] 구분자를 '.'에서 '__'로 변경 ▼▼▼
+                                    if prop.is_a("IfcPropertySingleValue"): 
+                                        prop_key = f"{prop_set.Name}__{prop.Name}"
+                                        element_dict["Parameters"][prop_key] = prop.NominalValue.wrappedValue if prop.NominalValue else None
+                                        # print(f"  - 파라미터 추가: {prop_key}") # 상세 디버깅 필요시 주석 해제
             if not is_spatial_element:
                 if hasattr(element, 'IsDefinedBy') and element.IsDefinedBy:
                     for definition in element.IsDefinedBy:
@@ -120,7 +125,11 @@ def serialize_ifc_elements_to_string_list(ifc_file):
                                 if hasattr(prop_set, 'Quantities') and prop_set.Quantities:
                                     for quantity in prop_set.Quantities:
                                         prop_value = get_quantity_value(quantity)
-                                        if prop_value is not None: element_dict["Parameters"][f"{prop_set.Name}.{quantity.Name}"] = prop_value
+                                        if prop_value is not None:
+                                            # ▼▼▼ [수정] 구분자를 '.'에서 '__'로 변경 ▼▼▼
+                                            prop_key = f"{prop_set.Name}__{quantity.Name}"
+                                            element_dict["Parameters"][prop_key] = prop_value
+                                            # print(f"  - 수량 파라미터 추가: {prop_key}") # 상세 디버깅 필요시 주석 해제
                 if hasattr(element, 'IsTypedBy') and element.IsTypedBy:
                     type_definition = element.IsTypedBy[0]
                     if type_definition and type_definition.is_a("IfcRelDefinesByType"):
@@ -132,14 +141,18 @@ def serialize_ifc_elements_to_string_list(ifc_file):
                                     if prop_set and prop_set.is_a("IfcPropertySet"):
                                         if hasattr(prop_set, 'HasProperties') and prop_set.HasProperties:
                                             for prop in prop_set.HasProperties:
-                                                if prop.is_a("IfcPropertySingleValue"): element_dict["TypeParameters"][f"{prop_set.Name}.{prop.Name}"] = prop.NominalValue.wrappedValue if prop.NominalValue else None
+                                                # ▼▼▼ [수정] 구분자를 '.'에서 '__'로 변경 ▼▼▼
+                                                if prop.is_a("IfcPropertySingleValue"): 
+                                                    prop_key = f"{prop_set.Name}__{prop.Name}"
+                                                    element_dict["TypeParameters"][prop_key] = prop.NominalValue.wrappedValue if prop.NominalValue else None
+                                                    # print(f"  - 타입 파라미터 추가: {prop_key}") # 상세 디버깅 필요시 주석 해제
                 if hasattr(element, 'ContainedInStructure') and element.ContainedInStructure: element_dict["SpatialContainer"] = f"{element.ContainedInStructure[0].RelatingStructure.is_a()}: {element.ContainedInStructure[0].RelatingStructure.Name}"
             if hasattr(element, 'Decomposes') and element.Decomposes: element_dict["Aggregates"] = f"{element.Decomposes[0].RelatingObject.is_a()}: {element.Decomposes[0].RelatingObject.Name}"
             if hasattr(element, 'Nests') and element.Nests: element_dict["Nests"] = f"{element.Nests[0].RelatingObject.is_a()}: {element.Nests[0].RelatingObject.Name}"
         except (AttributeError, IndexError, TypeError): pass
         elements_data.append(json.dumps(element_dict))
+    print(f"✅ [Blender] 객체 데이터 직렬화 완료.") # 디버깅 추가
     return elements_data
-
 def get_selected_element_guids():
     guids = []
     ifc_file, error = get_ifc_file()
